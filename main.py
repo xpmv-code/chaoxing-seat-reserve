@@ -18,12 +18,12 @@ from utils import reserve, get_user_credentials
 get_current_time = lambda action: time.strftime("%H:%M:%S", time.localtime(time.time() + 8*3600)) if action else time.strftime("%H:%M:%S", time.localtime(time.time()))
 get_current_dayofweek = lambda action: time.strftime("%A", time.localtime(time.time() + 8*3600)) if action else time.strftime("%A", time.localtime(time.time()))
 
-# === 配置参数 ===
-SLEEPTIME = 9           # 每次尝试的间隔时间（秒）
-ENDTIME = "20:01:00"    # 停止尝试的时间（超过学校关闭时间1分钟）
-ENABLE_SLIDER = False   # 是否启用滑块验证
-MAX_ATTEMPT = 2         # 单次预约的最大尝试次数
-RESERVE_NEXT_DAY = True # 预约明天的座位而不是今天
+# === 配置参数（已按西安体育学院图书馆 roomid=14176 的规则校准）===
+SLEEPTIME = 1           # 每次尝试的间隔时间（秒）：该校0点放座，间隔要短
+ENDTIME = "00:05:00"    # 停止尝试的时间（0点开放，抢到0点05分）
+ENABLE_SLIDER = False   # 是否启用滑块验证（该校 securityVerify=0，无需滑块）
+MAX_ATTEMPT = 2         # 单时段单次遍历的最大尝试次数（外层仍会循环到ENDTIME）
+RESERVE_NEXT_DAY = False # 该校当天0点开放当天座位，因此约当天而非次日
 
 
 
@@ -70,40 +70,59 @@ def login_and_reserve(users, usernames, passwords, action, success_list=None):
     if reserve_instances:
         for s in reserve_instances:
             if s.success_results:
-                s.send_all_results_email()
+                s.send_bark_notification()
                 break  # 只发送一次（合并所有结果）
     
     return success_list
 
 
+def _hms_to_seconds(hms):
+    """HH:MM:SS 转换为当天经过的秒数"""
+    h, m, s = map(int, hms.split(":"))
+    return h * 3600 + m * 60 + s
+
+
+def _in_running_window(now_str, start_seconds, end_seconds):
+    """判断当前时间是否仍在抢座窗口内，支持跨午夜（如23:59启动、00:05结束）"""
+    now_seconds = _hms_to_seconds(now_str)
+    if end_seconds > start_seconds:
+        return now_seconds < end_seconds
+    # 结束时刻早于启动时刻，说明结束点在次日
+    return now_seconds >= start_seconds or now_seconds < end_seconds
+
+
 def main(users, action=False):
     """主预约循环"""
     current_time = get_current_time(action)
-    logging.info(f"开始时间 {current_time} ({'action' if action else 'preview'})")
-    
+    start_seconds = _hms_to_seconds(current_time)
+    end_seconds = _hms_to_seconds(ENDTIME)
+    logging.info(f"开始时间 {current_time} ({'action' if action else 'preview'})，窗口截止 {ENDTIME}")
+
     attempt_times = 0
     success_list = None
     usernames, passwords = None, None
-    
+
     if action:
         usernames, passwords = get_user_credentials(action)
-    
-    current_dayofweek = get_current_dayofweek(action)
-    # 计算今天应该预约的座位数
-    today_reservation_num = sum(1 for d in users if current_dayofweek in d.get('daysofweek'))
-    
-    # 主循环：不断尝试预约直到超时或全部成功
-    while current_time < ENDTIME:
+
+    # 主循环：不断尝试预约直到超出窗口或全部成功
+    while _in_running_window(current_time, start_seconds, end_seconds):
         attempt_times += 1
+        # 每轮重新计算星期，兼容23:5x启动、跨午夜后星期切换
+        current_dayofweek = get_current_dayofweek(action)
+        today_reservation_num = sum(
+            1 for d in users if not d.get('daysofweek') or current_dayofweek in d.get('daysofweek')
+        )
+
         success_list = login_and_reserve(users, usernames, passwords, action, success_list)
-        
-        logging.info(f"尝试 #{attempt_times} | 当前时间 {current_time} | 成功 {sum(success_list)}/{today_reservation_num}")
-        
+
+        logging.info(f"尝试 #{attempt_times} | 当前时间 {current_time}({current_dayofweek}) | 成功 {sum(success_list)}/{today_reservation_num}")
+
         # 检查是否全部预约成功
-        if sum(success_list) == today_reservation_num:
+        if today_reservation_num > 0 and sum(success_list) == today_reservation_num:
             logging.info("已成功预订所有座位!")
             return
-        
+
         current_time = get_current_time(action)
 
 
@@ -143,7 +162,7 @@ def debug(users, action=False):
         
         # 发送邮件并返回
         if suc and s.success_results:
-            s.send_all_results_email()
+            s.send_bark_notification()
         return
 
 def get_roomid(args1, args2):

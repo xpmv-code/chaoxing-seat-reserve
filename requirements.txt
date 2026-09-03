@@ -1,0 +1,7 @@
+# 运行必需依赖
+cryptography
+requests
+
+# 滑块验证可选依赖（main.py 中 ENABLE_SLIDER=True 时才需要）
+# numpy
+# opencv-python

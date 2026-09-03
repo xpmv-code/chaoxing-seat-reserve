@@ -22,16 +22,8 @@
       ]
     }
   ],
-  "mail": {
-    "host": "smtp.qq.com",
-    "port": 465,
-    "secure": true,
-    "auth": {
-      "user": "your_email@qq.com",
-      "pass": "your_email_authorization_code"
-    }
-  },
-  "receivers": [
-    "your_email@example.com"
-  ]
+  "bark": {
+    "server": "https://api.day.app",
+    "key": "your_bark_device_key"
+  }
 }

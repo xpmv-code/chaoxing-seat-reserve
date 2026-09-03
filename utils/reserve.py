@@ -35,8 +35,7 @@ class reserve:
         self.success_results = []  # 存储所有成功的预约结果
         # 配置读取
         config = json.load(open("config.json", encoding="utf-8"))
-        self.mail_config = config.get("mail", {})
-        self.receivers = config.get("receivers", [])
+        self.bark = config.get("bark", {})
         
         # HTTP 会话
         self.requests = requests.session()
@@ -114,7 +113,7 @@ class reserve:
             return (True, "")
         else:
             logging.info(
-                f"用户 {username} 登录失败。请检查您的密码和用户名! "
+                f"用户 {username} 登录失败：{obj.get('msg2', '请检查用户名和密码')}"
             )
             return (False, obj["msg2"])
 
@@ -235,8 +234,8 @@ class reserve:
         
         return max_loc[0]
 
-    def _split_times(self, start_time, end_time, max_hours=5):
-        """将超过max_hours的时间段切分成多个子段"""
+    def _split_times(self, start_time, end_time, max_hours=4, min_hours=2):
+        """按学校规则切分时段：单段不超过max_hours、不短于min_hours、30分钟对齐"""
         def to_minutes(t):
             h, m = map(int, t.split(":"))
             return h * 60 + m
@@ -251,26 +250,38 @@ class reserve:
 
         total_min = end_min - start_min
         max_min = max_hours * 60
+        min_min = min_hours * 60
 
         if total_min <= max_min:
-            return [(start_time, end_time)]
+            return [(start_time, to_str(end_min))]
 
+        # 先按 max_hours 等长切分
         segments = []
         cur = start_min
         while cur < end_min:
             nxt = min(cur + max_min, end_min)
-            segments.append((to_str(cur), to_str(nxt)))
+            segments.append([cur, nxt])
             cur = nxt
-        return segments
+
+        # 尾段不足最短时长时，逐次向前一段回借30分钟，保证每段都合规
+        while (
+            len(segments) >= 2
+            and segments[-1][1] - segments[-1][0] < min_min
+            and segments[-2][1] - segments[-2][0] > min_min
+        ):
+            segments[-2][1] -= 30
+            segments[-1][0] -= 30
+
+        return [(to_str(a), to_str(b)) for a, b in segments]
 
     def submit(self, times, roomid, seatid, action):
         """提交预约请求"""
         start_time, end_time = times[0], times[1]
         
-        # 切分超过5小时的时间段
+        # 切分超过单次时长上限的时段
         segments = self._split_times(start_time, end_time)
         if len(segments) > 1:
-            logging.info(f"时段长度超过5小时，切分为 {len(segments)} 段")
+            logging.info(f"时段超过单次预约上限，切分为 {len(segments)} 段")
 
         # 逐个座位、逐个时段提交预约
         for seat in seatid:
@@ -362,38 +373,43 @@ class reserve:
 
         return result["success"]
 
-    def send_all_results_email(self):
-        """发送合并的邮件（包含所有成功的预约）"""
+    def send_bark_notification(self):
+        """通过 Bark 把所有成功的预约结果推送到 iPhone/iPad"""
         if not self.success_results:
-            logging.info("没有成功的预约，不发送邮件")
+            logging.info("没有成功的预约，不发送推送")
             return
-        
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.header import Header
 
-        # 构建邮件内容
-        email_lines = ["超星图书馆预约座位成功！", " " * 60]
+        key = self.bark.get("key", "")
+        server = self.bark.get("server", "https://api.day.app").rstrip("/")
+        if not key:
+            logging.error("✗ Bark 推送失败: config.json 未配置 bark.key")
+            return
+
+        # 构建推送内容
+        body_lines = []
         for idx, result in enumerate(self.success_results, 1):
-            email_lines.append(f"预约 {idx}:")
-            email_lines.append(f"  房间代号: {result['roomId']}")
-            email_lines.append(f"  座位: {result['seatNum']}")
-            email_lines.append(f"  时间: {result['startTime']} ~ {result['endTime']}")
-            email_lines.append(f"  日期: {result['day']}")
-            email_lines.append(" " * 60)
+            body_lines.append(
+                f"预约 {idx}：\n"
+                f"房间 {result['roomId']}｜座位 {result['seatNum']}\n"
+                f"{result['day']} {result['startTime']}~{result['endTime']}"
+            )
+        payload = {
+            "title": f"超星图书馆预约成功（共{len(self.success_results)}条）",
+            "body": "\n\n".join(body_lines),
+            "group": "超星抢座",
+        }
 
-        email_content = "\n".join(email_lines)
-        
-        # 发送邮件
+        # 用独立请求发送，避免复用带 office.chaoxing.com Host 头的会话
         try:
-            message = MIMEText(email_content, "plain", "utf-8")
-            message["From"] = Header(self.mail_config["auth"]["user"])
-            message["To"] = Header(",".join(self.receivers))
-            message["Subject"] = Header(f"超星图书馆预约座位成功 - 共{len(self.success_results)}条")
-
-            smtpObj = smtplib.SMTP_SSL(self.mail_config["host"], self.mail_config["port"])
-            smtpObj.login(self.mail_config["auth"]["user"], self.mail_config["auth"]["pass"])
-            smtpObj.sendmail(self.mail_config["auth"]["user"], self.receivers, message.as_string())
-            logging.info("✓ 邮件发送成功")
-        except smtplib.SMTPException as e:
-            logging.error(f"✗ 邮件发送失败: {str(e)}")
+            response = requests.post(
+                f"{server}/{key}",
+                json=payload,
+                timeout=10,
+            )
+            data = response.json()
+            if data.get("code") == 200:
+                logging.info("✓ Bark 推送成功")
+            else:
+                logging.error(f"✗ Bark 推送返回异常: {data}")
+        except Exception as e:
+            logging.error(f"✗ Bark 推送失败: {str(e)}")
