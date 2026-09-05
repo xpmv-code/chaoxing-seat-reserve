@@ -25,7 +25,8 @@ class reserve:
         reserve_next_day=False,
     ):
         # API 端点
-        self.login_page = "https://passport2.chaoxing.com/mlogin?loginType=1&newversion=true&fid="
+        # 原 mlogin 登录页已失效（302 循环到 passport403），改用 office 主页初始化会话
+        self.login_page = "https://office.chaoxing.com/"
         self.url = "https://office.chaoxing.com/front/third/apps/seat/code?id={}&seatNum={}"
         self.submit_url = "https://office.chaoxing.com/data/apps/seat/submit"
         self.login_url = "https://passport2.chaoxing.com/fanyalogin"
@@ -75,7 +76,14 @@ class reserve:
 
     def _get_page_token(self, url, require_value=False):
         """获取预约页面的 token 和加密值"""
-        response = self.requests.get(url=url, verify=False)
+        # 座位页面需使用桌面浏览器 UA，手机微信 UA 会返回 500 错误页
+        page_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Referer": "https://office.chaoxing.com/",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+        }
+        response = self.requests.get(url=url, verify=False, headers=page_headers)
         html = response.content.decode("utf-8")
         
         # 从 hidden input submit_enc 中提取 token
@@ -358,7 +366,8 @@ class reserve:
             seat_info = result['data']['seatReserve']
             start_time = times[0]
             end_time = times[1]
-            logging.info(f"✓ 预约成功 - 座位:{seat_info['seatNum']} {start_time}~{end_time}")
+            self.last_reserve_id = seat_info['id']
+            logging.info(f"✓ 预约成功 - 座位:{seat_info['seatNum']} {start_time}~{end_time} reserveId={seat_info['id']}")
             
             # 保存成功结果用于后续邮件
             self.success_results.append({
@@ -372,6 +381,79 @@ class reserve:
             logging.info("✗ 预约失败")
 
         return result["success"]
+
+    def sign(self, reserve_id):
+        """签到：调用签到接口（模拟扫码签到，预约前后20分钟内有效）"""
+        url = f"https://office.chaoxing.com/data/apps/seat/sign?id={reserve_id}"
+        try:
+            r = self.requests.get(url=url, verify=False, timeout=15)
+            result = r.json()
+            if result.get("success"):
+                logging.info(f"✓ 签到成功 reserveId={reserve_id}")
+                return True
+            else:
+                logging.error(f"✗ 签到失败: {result}")
+                return False
+        except Exception as e:
+            logging.error(f"✗ 签到异常: {str(e)[:100]}")
+            return False
+
+    def _get_renewal_token(self, reserve_id, roomid, seatid):
+        """续约：访问带 reserveId 的座位页面获取 submit_enc（签到后页面才有）"""
+        renewal_url = (
+            f"https://office.chaoxing.com/front/apps/seat/code"
+            f"?id={roomid}&seatNum={seatid}&num={seatid}"
+            f"&reserveId={reserve_id}&room={roomid}&signType=1"
+        )
+        return self._get_page_token(renewal_url, require_value=True)
+
+    def renewal(self, times, roomid, seatid, reserve_id, action=False):
+        """续约：签到后提交续约，返回新的 reserveId（成功）或 None（失败）"""
+        token, value = self._get_renewal_token(reserve_id, roomid, seatid)
+        if not value:
+            logging.error("续约失败：无法从签到后页面获取 submit_enc")
+            return None
+
+        delta_day = 1 if self.reserve_next_day else 0
+        day = datetime.date.today() + datetime.timedelta(days=delta_day)
+        if action:
+            day += datetime.timedelta(days=1)
+
+        # 续约参数（与首次预约不同：无 token/type/verifyData，多 wyToken）
+        parm = {
+            "roomId": roomid,
+            "startTime": times[0],
+            "endTime": times[1],
+            "day": str(day),
+            "seatNum": seatid,
+            "captcha": "",
+            "wyToken": "",
+        }
+        parm["enc"] = verify_param(parm, value)
+
+        logging.info(f"提交续约 - 房间:{roomid} 座位:{seatid} 时间:{times[0]}-{times[1]} 日期:{day}")
+        try:
+            html = self.requests.post(
+                url=self.submit_url, params=parm, verify=True, timeout=15
+            ).content.decode("utf-8")
+            result = json.loads(html)
+            if result["success"]:
+                seat_info = result['data']['seatReserve']
+                logging.info(f"✓ 续约成功 - 座位:{seat_info['seatNum']} {times[0]}~{times[1]} 新reserveId={seat_info['id']}")
+                self.success_results.append({
+                    'seatNum': seat_info['seatNum'],
+                    'startTime': times[0],
+                    'endTime': times[1],
+                    'roomId': roomid,
+                    'day': str(day)
+                })
+                return seat_info['id']
+            else:
+                logging.info(f"✗ 续约失败: {result.get('msg', '')}")
+                return None
+        except Exception as e:
+            logging.error(f"✗ 续约异常: {str(e)[:100]}")
+            return None
 
     def send_bark_notification(self):
         """通过 Bark 把所有成功的预约结果推送到 iPhone/iPad"""

@@ -8,6 +8,7 @@ import time
 import argparse
 import os
 import logging
+import datetime
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -87,8 +88,13 @@ def _in_running_window(now_str, start_seconds, end_seconds):
     now_seconds = _hms_to_seconds(now_str)
     if end_seconds > start_seconds:
         return now_seconds < end_seconds
-    # 结束时刻早于启动时刻，说明结束点在次日
-    return now_seconds >= start_seconds or now_seconds < end_seconds
+    # end 早于 start 有两种情况：
+    #  1) 跨午夜窗口：晚间(>12:00)启动、次日凌晨 end 截止
+    #  2) 启动已晚于 end（如 00:05 后才启动），此时窗口已过应立即结束，避免无限循环
+    if start_seconds > 12 * 3600:  # 启动晚于中午12点，判定为跨午夜
+        return now_seconds >= start_seconds or now_seconds < end_seconds
+    # 凌晨启动但已超过截止时间，说明抢座窗口已过
+    return False
 
 
 def main(users, action=False):
@@ -165,6 +171,95 @@ def debug(users, action=False):
             s.send_bark_notification()
         return
 
+def wait_until(target_hms):
+    """等待到当天目标时间 HH:MM，已过则不等待（签到窗口为预约前后20分钟）"""
+    now = datetime.datetime.now()
+    h, m = map(int, target_hms.split(":"))
+    target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    if target <= now:
+        logging.info(f"目标时间 {target_hms} 已过，直接执行")
+        return
+    wait_s = (target - now).total_seconds()
+    logging.info(f"等待到 {target_hms}（约 {wait_s/3600:.1f} 小时后）")
+    time.sleep(wait_s)
+
+
+def main_with_renewal(users, action=False):
+    """持续运行模式：预约第一段 → 等待第一段开始时间签到(仅一次) → 连续续约到结束时段"""
+    current_time = get_current_time(action)
+    current_dayofweek = get_current_dayofweek(action)
+    logging.info(f"持续运行模式(签到续约)启动 {current_time} ({current_dayofweek})")
+
+    if action:
+        usernames, passwords = get_user_credentials(action)
+
+    for index, user in enumerate(users):
+        username, password, times, roomid, seatid, daysofweek = user.values()
+
+        if daysofweek and current_dayofweek not in daysofweek:
+            logging.info("今天没有预订!")
+            continue
+
+        if action:
+            username, password = usernames.split(',')[index], passwords.split(',')[index]
+
+        if isinstance(seatid, str):
+            seatid = [seatid]
+        seat = seatid[0]
+
+        s = reserve(sleep_time=SLEEPTIME, max_attempt=MAX_ATTEMPT,
+                    enable_slider=ENABLE_SLIDER, reserve_next_day=RESERVE_NEXT_DAY)
+        s.get_login_status()
+        s.login(username, password)
+        s.requests.headers.update({'Host': 'office.chaoxing.com'})
+
+        # 切分时段（单次上限4小时，最短2小时，30分钟对齐）
+        segments = s._split_times(times[0], times[1])
+        logging.info(f"总时段 {times[0]}-{times[1]} 切分为 {len(segments)} 段: {segments}")
+
+        # === 预约第一段 ===
+        first_start, first_end = segments[0]
+        logging.info(f"=== 预约第一段: {first_start}-{first_end} ===")
+        token, value = s._get_page_token(s.url.format(roomid, seat), require_value=True)
+        suc = s.get_submit(
+            s.submit_url, times=[first_start, first_end],
+            token=token, roomid=roomid, seatid=seat,
+            captcha="", action=action, value=value,
+        )
+        if not suc:
+            logging.error("第一段预约失败，终止")
+            return
+        reserve_id = s.last_reserve_id
+        logging.info(f"第一段预约成功 reserveId={reserve_id}")
+
+        # === 仅在第一段开始时间签到一次，之后连续续约无需再签到 ===
+        first_sign_time = segments[0][0]
+        logging.info(f"=== 等待签到时间 {first_sign_time}（全天仅签到一次）===")
+        wait_until(first_sign_time)
+        if not s.sign(reserve_id):
+            logging.error("签到失败，无法进行后续续约")
+            return
+
+        # 连续续约后续段（每次续约后页面自动刷新 submit_enc，无需再签到）
+        for i in range(1, len(segments)):
+            seg_start, seg_end = segments[i]
+            logging.info(f"=== 续约 {seg_start}-{seg_end} ===")
+            new_id = s.renewal([seg_start, seg_end], roomid, seat, reserve_id, action)
+            if new_id:
+                reserve_id = new_id
+            else:
+                logging.error(f"续约失败 {seg_start}-{seg_end}，终止后续续约")
+                break
+
+            time.sleep(2)
+
+        # 发送 Bark 通知
+        if s.success_results:
+            s.send_bark_notification()
+
+    logging.info("持续运行模式结束")
+
+
 def get_roomid(args1, args2):
     """获取房间ID（用于探测）"""
     username = input("请输入用户名: ")
@@ -184,12 +279,12 @@ if __name__ == "__main__":
     config_path = os.path.join(os.path.dirname(__file__), 'config.json')
     parser = argparse.ArgumentParser(prog='Chao Xing seat auto reserve')
     parser.add_argument('-u', '--user', default=config_path, help='user config file')
-    parser.add_argument('-m', '--method', default="reserve", choices=["reserve", "debug", "room"], help='execution method')
+    parser.add_argument('-m', '--method', default="reserve", choices=["reserve", "debug", "room", "renewal"], help='execution method: reserve=抢座循环, debug=单次测试, renewal=预约+签到续约持续运行')
     parser.add_argument('-a', '--action', action="store_true", help='enable GitHub Action mode')
     args = parser.parse_args()
     
     # 执行对应的方法
-    func_dict = {"reserve": main, "debug": debug, "room": get_roomid}
+    func_dict = {"reserve": main, "debug": debug, "room": get_roomid, "renewal": main_with_renewal}
     with open(args.user, "r+", encoding="utf-8") as data:
         usersdata = json.load(data)["reserve"]
     func_dict[args.method](usersdata, args.action)

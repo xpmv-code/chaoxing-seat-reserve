@@ -2,174 +2,157 @@
 超星图书馆座位预约脚本
 
 ## 说明
-
 本项目是基于原有的超星图书馆座位预约项目进行修改与整理，保留原项目的版权信息和许可证说明。使用时请遵守原项目所采用的 Apache License 2.0 许可证要求，包含但不限于保留原始版权声明、许可证说明及相关通知。
+
+当前版本已适配**西安体育学院图书馆**（roomid=14176），支持 Bark 推送通知，并新增**签到后续约**功能，可实现从开馆到闭馆的全时段自动预约。
+
+## 功能特性
+
+- **自动登录预约**：0点开放后自动抢约当天座位
+- **签到续约**：预约第一段后，到签到时间自动签到，随后连续续约所有后续时段（仅需签到一次）
+- **时段自动切片**：按学校规则（单次2-4小时）自动切分全天时段
+- **Bark 推送**：预约/续约成功后通过 Bark 推送到 iPhone/iPad
+- **多用户支持**：支持多个账号同时预约
 
 ## 如何使用
 
 > 为了安全，建议将你的真实配置保存在本地的 config.json 中，不要直接提交到 GitHub。仓库中提供了一个示例配置文件 config.example.json，可作为参考。
 
-### 本地部署方式
-
-#### 1、安装依赖
-
-运行脚本前先安装一个包
+### 1、安装依赖
 
 ```bash
-pip install cryptography
+pip install cryptography requests
 ```
 
-如果有滑块验证，则需要额外安装numpy和opencv-python
+如果有滑块验证，则需要额外安装 numpy 和 opencv-python：
 
 ```bash
-pip install numpy, opencv-python
+pip install numpy opencv-python
 ```
 
-#### 2、 获取roomid（图书馆id）和seatid（座位号）
-
-在使用之前需要先在如下获取图书馆对应的id和座位号，下面的配置里已经提供了上海大学图书馆的id。对于不知道id的，可以通过如下方式进行：
-
-![获取图书馆id](./img/1.png)
+### 2、获取 roomid 和 seatid
 
 在进入预约图书馆列表界面时断开网络，点击你想预约的图书馆的`选座`按钮，会提示网页无法打开，此时点击`右上角的三条杠`，选择`复制链接`，会得到类似这样的链接：
 
 > https://office.chaoxing.com/front/apps/seat/select?id=5483&day=2023-10-12&backLevel=2&pageToken=0f46f3acc7be4c60862cb9815870ddfd
 
-其中的`id=5483`的5483即为对应图书馆的id，将其填写到config.json中，座位联网后自己挑即可（详细填写参见后面的setting）
+其中的`id=5483`的5483即为对应图书馆的id，座位号联网后自己挑选即可（注意用0补全至3位数，例如6号座位填006）。
 
-#### 3、running
+### 3、配置 config.json
 
-复制一份配置文件并修改为你的实际信息：
+复制示例配置并修改：
 
 ```bash
-copy config.example.json config.json
+cp config.example.json config.json
 ```
 
-然后编辑 config.json，填写你的座位预约信息。
+编辑 config.json，填写账号、座位、时段等信息（详见下方 config 配置说明）。
 
-由于脚本是检测系统时间为7点时进行预约（在main.py 第16行），如果有特殊要求可以修改。通过 `python main.py` 运行脚本, 添加参数 `-u config.json` 来指明配置文件路径
+### 4、运行
 
-运行`python main.py -m debug`可以立即运行查看配置是否正确。
+```bash
+# 抢座循环模式（0点启动，持续尝试到 ENDTIME）
+python main.py -u config.json
 
-关于运行的方式，现在提供了多种运行方式：
+# 调试模式（单次预约，立即执行）
+python main.py -u config.json -m debug
 
-- Linux环境下：
-
-在Linux下可以使用如下方式添加crontab , 运行：`crontab -e`添加指令 :`0 7 * * * python3 main.py`
-
-- windows环境下：
-
-windows下使用时间任务:
-
-![windows下使用时间任务](./img/2.png)
-
-### github actions部署方式（目前应该没有问题了）：
-
-  这种方式可以不需要在本地部署环境，只需要把fork该仓库并修改配置文件即可。
-
-1.**fork该仓库**
-
-2.**修改config.json**：这个仿照之前的方式进行修改即可，但是注意，username和password请留空或者随便填以防止泄漏个人账号密码。（具体的需要填写在自己repo的settings中）。时间什么也是需要修改（修改到仓库中）不要忘记。
-
-3.**配置账号密码**：在settings->secrets and variables->Repository secrets 创建两个secret keys。名称分别为USERNAMES，PASSWORDS，填写自己的账号和密码即可。（如果有多个用户，请使用,(英文逗号)隔开，如果密码中有逗号可能会出现问题）。
-
-```
-xxxxxxx,xxxxxxx
+# 签到续约持续运行模式（推荐：预约第一段→签到→连续续约到闭馆）
+python main.py -u config.json -m renewal
 ```
 
-4.**运行action**：在action -> auto_reserve -> run workflows 选择main分支即可。
+**推荐使用 `-m renewal` 模式**：0点预约第一段4小时，到开馆时间自动签到一次，随后连续续约所有后续时段直到闭馆，无需人工干预。
 
-吉首大学只用修改账号密码，别的高校需要自己去查找一下roomid哦，学习通断网就可打开网页查看id了
+### 5、定时任务
 
-## config配置
-之后编辑config.json并填写座位预约相关信息即可
+Linux 下使用 crontab：
+
+```bash
+crontab -e
+# 每天0点执行签到续约模式
+0 0 * * * cd /path/to/chaoxing-seat-reserve && python main.py -u config.json -m renewal
+```
+
+Windows 下使用任务计划程序，设置每天0点触发。
+
+## 签到续约模式说明
+
+西安体育学院图书馆规则：
+- 单次预约上限4小时，最短2小时
+- 预约开始时间前后20分钟内可扫码签到，未签到视为违约
+- 签到后可连续续约后续时段，无需再次签到
+- 工作日开馆 08:00-22:00，周末 09:00-22:00
+
+`renewal` 模式运行流程（以周末为例）：
+
+```
+00:00  预约第一段 09:00-13:00
+09:00  自动签到（仅一次）
+       续约 13:00-17:00
+       续约 17:00-20:00
+       续约 20:00-22:00
+```
+
+时段自动切片结果（均在2-4小时区间）：
+- 工作日 08:00-22:00 → 08-12、12-16、16-20、20-22
+- 周末 09:00-22:00 → 09-13、13-17、17-20、20-22
+
+## config 配置
+
 ```json
 {
-  // https://passport2.chaoxing.com/mlogin?loginType=1&newversion=true&fid=&  在这个网站查看是否可以顺利登陆 
   "reserve": [
     {
       "username": "XXXXXXXX",
-      //账号
       "password": "XXXXXXXX",
-      //密码
-      "time": [
-        "08:00",
-        //预约的起始时间
-        "22:00"
-        //预约的结束时间
-      ],
-      "roomid": "2609",
-      //图书馆id
-      "seatid": "002",
-      // 注意要用0补全至3位数，例如6号座位应该填006
-      "daysofweek": [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday"
-      ]
-      //预约的星期
+      "time": ["08:00", "22:00"],
+      "roomid": "14176",
+      "seatid": ["023"],
+      "daysofweek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
     },
     {
-      "username": "xxxxxxxxxx",
-      "password": "xxxxxxxxx",
-      "time": [
-        "20:00",
-        "21:00"
-      ],
-      "roomid": "5483",
-      "seatid": [
-        "056"
-      ],
-      "daysofweek": [//预约的星期 没有参数就是预约所有星期
-        "Saturday",
-        "Sunday"
-      ]
+      "username": "XXXXXXXX",
+      "password": "XXXXXXXX",
+      "time": ["09:00", "22:00"],
+      "roomid": "14176",
+      "seatid": ["023"],
+      "daysofweek": ["Saturday", "Sunday"]
     }
   ],
-  "mail": {//邮件配置
-    "host": "smtp.qq.com",
-    "port": 465,
-    "secure": true,
-    "auth": {
-      "user": "xxxxxxxxxx@qq.com",
-      "pass": "xxxxxxxxxxxxxxxx"
-    }
-  },
-  "receivers": [//收件人列表
-    "xxxxxxxxxx@qq.com"
-  ]
+  "bark": {
+    "server": "https://api.day.app",
+    "key": "你的Bark设备Key"
+  }
 }
 ```
-参考前面的运行方式即可。
 
+**字段说明：**
+- `username` / `password`：学习通账号密码
+- `time`：预约起止时间 `[开始, 结束]`
+- `roomid`：图书馆ID（西安体育学院为 14176）
+- `seatid`：座位号列表，用0补全至3位数
+- `daysofweek`：预约的星期，留空则每天都约
+- `bark.server` / `bark.key`：Bark 推送配置，用于接收预约成功通知
 
 ## 高级设置
 
-在main.py中有四个参数可以选择
+在 main.py 中有以下参数可调整：
 
 ```python
-SLEEPTIME = 0.2 # 每次抢座的间隔
-ENDTIME = "07:01:00" # 根据学校的开始预约座位时间+1min即可
-
-ENABLE_SLIDER = False # 是否有滑块验证，设置为True开启滑块验证
-MAX_ATTEMPT = 4 # 最大尝试次数
+SLEEPTIME = 1           # 每次抢座间隔（秒）
+ENDTIME = "00:05:00"    # 抢座窗口截止时间
+ENABLE_SLIDER = False    # 是否启用滑块验证
+MAX_ATTEMPT = 2          # 单时段最大尝试次数
+RESERVE_NEXT_DAY = False # 是否预约次日（西安体院当天0点放当天座位）
 ```
-可以直接进行修改，但是不建议把**SLEEPTIME**设置太小。
 
-## 存在的问题
-- {当前人数过多，请等待5分钟后尝试}。这种是请求方式错误或者请求键值错误导致的，通常是由于学习通更新了预约导致的
-- 以字典格式输出的其他错误，仔细查看用户名密码，roomid和seatid是否填写正确。
-- 
+## 常见问题
 
-### 无法预约情况debug方式
-> 1、电脑端访问："https://passport2.chaoxing.com/mlogin?loginType=1&newversion=true&fid=" 使用自己的用户名密码登录
-> 2、电脑端访问：”https://office.chaoxing.com/front/third/apps/seat/code?id={图书馆id}&seatNum={座位id}“查看是否显示时间表
-> 3、尝试预约看看是否会出现验证方式
+- **"本周违约次数已达上限"**：账号因未签到违约次数超限，需等待下周重置或更换账号
+- **"当前人数过多，请等待5分钟后尝试"**：请求过于频繁，适当增大 SLEEPTIME
+- **登录失败（403）**：学习通登录服务对频繁请求触发IP风控，等待数小时后自动解除
+- **预约失败**：检查用户名密码、roomid、seatid 是否正确，以及当天是否已有预约
 
-源项目，从下面的链接改的
-https://gitee.com/lcz2000/ChaoXingLibrarySeatReservation
+## 致谢
 
-
-当上面的都没问题了之后，可以设置一个windows定时程序，每天晚上自动执行
+源项目：https://gitee.com/lcz2000/ChaoXingLibrarySeatReservation
