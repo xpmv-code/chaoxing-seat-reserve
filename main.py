@@ -9,6 +9,7 @@ import argparse
 import os
 import logging
 import datetime
+import requests
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -228,6 +229,22 @@ def reserve_first(users, action=False):
         )
         if suc and s.success_results:
             s.send_bark_notification()
+        elif not suc:
+            # 抢座失败也要通知（带原因）
+            err = getattr(s, 'last_error', '未知原因')
+            logging.error(f"第一段预约失败: {err}")
+            key = s.bark.get("key", "")
+            server = s.bark.get("server", "https://api.day.app").rstrip("/")
+            if key:
+                try:
+                    requests.post(f"{server}/{key}", json={
+                        "title": "超星抢座失败",
+                        "body": f"座位{seat} {first_start}-{first_end} 预约失败：{err}",
+                        "group": "超星抢座",
+                    }, timeout=10)
+                    logging.info("✓ Bark 推送失败通知")
+                except Exception as e:
+                    logging.error(f"✗ Bark 推送失败: {str(e)}")
         return suc
 
 

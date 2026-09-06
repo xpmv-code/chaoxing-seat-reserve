@@ -466,6 +466,7 @@ class reserve:
             })
         else:
             logging.info("✗ 预约失败")
+            self.last_error = result.get("msg", "未知原因")
 
         return result["success"]
 
