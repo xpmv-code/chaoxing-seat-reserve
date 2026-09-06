@@ -100,8 +100,14 @@ class reserve:
         return matches[0] if matches else "", value_matches[0] if value_matches else ""
 
     def get_login_status(self):
-        """获取登录状态（初始化会话）"""
-        self.requests.headers = self.login_headers
+        """获取登录状态（用桌面UA初始化会话，避免手机UA被风控）"""
+        init_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Referer": "https://office.chaoxing.com/",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+        }
+        self.requests.headers.update(init_headers)
         self.requests.get(url=self.login_page, verify=False)
 
     def login(self, username, password):
@@ -111,9 +117,20 @@ class reserve:
             "fid": -1,
             "uname": username,
             "password": password,
-            "refer": "http%3A%2F%2Foffice.chaoxing.com%2Ffront%2Fthird%2Fapps%2Fseat%2Fcode%3Fid%3D4219%26seatNum%3D380",
+            "refer": "https://office.chaoxing.com/",
             "t": True,
         }
+        # 登录请求使用桌面UA和正确的Referer/Origin
+        login_req_headers = {
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Referer": "https://office.chaoxing.com/",
+            "Origin": "https://office.chaoxing.com",
+        }
+        self.requests.headers.update(login_req_headers)
         jsons = self.requests.post(url=self.login_url, params=parm, verify=False)
         obj = jsons.json()
         if obj["status"]:
