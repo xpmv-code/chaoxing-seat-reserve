@@ -47,17 +47,9 @@ def sign_seat(config_path="config.json"):
             return
     s.requests.headers.update({'Host': 'office.chaoxing.com'})
 
-    # 获取当前预约信息
-    info_url = f"https://office.chaoxing.com/data/apps/seat/reserve/info?id={roomid}&seatNum={seat_num}"
-    try:
-        r = s.requests.get(info_url, verify=False, timeout=15)
-        data = r.json()
-    except Exception as e:
-        logging.error(f"获取预约信息失败: {str(e)[:100]}")
-        send_bark(config, "签到失败：获取预约信息异常")
-        return
-
-    seat_reserve = data.get("data", {}).get("seatReserve")
+    # 获取当前预约信息（用 curReserves 接口）
+    fid_enc = user_config.get("fidEnc", "e17c5f34de515200")
+    seat_reserve = s.get_cur_reserve(roomid, seatid, fid_enc)
     if not seat_reserve:
         logging.info("当前没有进行中的预约，无需签到")
         send_bark(config, "签到：当前无进行中的预约")

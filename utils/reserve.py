@@ -470,6 +470,25 @@ class reserve:
 
         return result["success"]
 
+    def get_cur_reserve(self, roomid, seatid, fid_enc):
+        """获取当前生效的预约记录（含未来时段）：从座位首页数据接口的 curReserves 中按座位匹配
+        返回 dict 或 None。reserve/info 接口对未来时段预约返回 None，不可用。"""
+        try:
+            url = f"https://office.chaoxing.com/data/apps/seat/index?fidEnc={fid_enc}"
+            r = self.requests.get(url=url, verify=False, timeout=15)
+            data = r.json()
+            cur_list = data.get("data", {}).get("curReserves", [])
+            seat_num = str(int(seatid))  # 027 → 27
+            for c in cur_list:
+                c_seat = str(int(str(c.get("seatNum"))))  # 027 → 27（去前导零）
+                c_room = str(c.get("roomId"))
+                if c_seat == seat_num and c_room == str(roomid):
+                    return c
+            return None
+        except Exception as e:
+            logging.error(f"获取当前预约失败: {str(e)[:100]}")
+            return None
+
     def sign(self, reserve_id):
         """签到：调用签到接口（模拟扫码签到，预约前后20分钟内有效）"""
         url = f"https://office.chaoxing.com/data/apps/seat/sign?id={reserve_id}"

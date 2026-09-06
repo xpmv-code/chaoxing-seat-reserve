@@ -43,7 +43,10 @@ def login_and_reserve(users, usernames, passwords, action, success_list=None):
     reserve_instances = []  # 保存所有的 reserve 实例
 
     for index, user in enumerate(users):
-        username, password, times, roomid, seatid, daysofweek = user.values()
+        username, password, times, roomid, seatid, daysofweek = (
+            user['username'], user['password'], user['time'],
+            user['roomid'], user['seatid'], user.get('daysofweek', [])
+        )
         
         # 检查今天是否需要预约
         if current_dayofweek not in daysofweek and daysofweek:
@@ -144,7 +147,10 @@ def debug(users, action=False):
     current_dayofweek = get_current_dayofweek(action)
     
     for index, user in enumerate(users):
-        username, password, times, roomid, seatid, daysofweek = user.values()
+        username, password, times, roomid, seatid, daysofweek = (
+            user['username'], user['password'], user['time'],
+            user['roomid'], user['seatid'], user.get('daysofweek', [])
+        )
         
         # 座位ID转为列表（若为字符串）
         if isinstance(seatid, str):
@@ -195,7 +201,10 @@ def reserve_first(users, action=False):
         usernames, passwords = get_user_credentials(action)
 
     for index, user in enumerate(users):
-        username, password, times, roomid, seatid, daysofweek = user.values()
+        username, password, times, roomid, seatid, daysofweek = (
+            user['username'], user['password'], user['time'],
+            user['roomid'], user['seatid'], user.get('daysofweek', [])
+        )
 
         if daysofweek and current_dayofweek not in daysofweek:
             logging.info("今天没有预订!")
@@ -258,7 +267,10 @@ def main_with_renewal(users, action=False):
         usernames, passwords = get_user_credentials(action)
 
     for index, user in enumerate(users):
-        username, password, times, roomid, seatid, daysofweek = user.values()
+        username, password, times, roomid, seatid, daysofweek = (
+            user['username'], user['password'], user['time'],
+            user['roomid'], user['seatid'], user.get('daysofweek', [])
+        )
 
         if daysofweek and current_dayofweek not in daysofweek:
             logging.info("今天没有预订!")
