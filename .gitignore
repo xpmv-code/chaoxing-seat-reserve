@@ -133,3 +133,6 @@ test.json
 # Local user config
 config.json
 config.local.json
+
+# Login cookies
+cookies.json

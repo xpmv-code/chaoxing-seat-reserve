@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 from .encrypt import AES_Encrypt, enc, generate_captcha_key, verify_param
 import json
+import os
 import requests
 import re
 import time
 import logging
 import datetime
 from urllib3.exceptions import InsecureRequestWarning
+
+# 登录 cookie 持久化文件（避免频繁登录触发风控）
+COOKIE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cookies.json")
 
 
 def get_date(day_offset: int = 0):
@@ -99,8 +103,64 @@ class reserve:
             
         return matches[0] if matches else "", value_matches[0] if value_matches else ""
 
+    def _load_cookies(self):
+        """从文件加载已保存的登录 cookie"""
+        if not os.path.exists(COOKIE_FILE):
+            return False
+        try:
+            with open(COOKIE_FILE, encoding="utf-8") as f:
+                cookies = json.load(f)
+            for c in cookies:
+                self.requests.cookies.set(
+                    c["name"], c["value"], domain=c.get("domain", "")
+                )
+            logging.info(f"已从 {COOKIE_FILE} 加载 {len(cookies)} 个 cookie")
+            return True
+        except Exception as e:
+            logging.warning(f"加载 cookie 失败: {str(e)[:80]}")
+            return False
+
+    def _save_cookies(self):
+        """保存当前会话 cookie 到文件"""
+        try:
+            cookies = [
+                {"name": c.name, "value": c.value, "domain": c.domain}
+                for c in self.requests.cookies
+            ]
+            with open(COOKIE_FILE, "w", encoding="utf-8") as f:
+                json.dump(cookies, f, ensure_ascii=False, indent=2)
+            logging.info(f"已保存 {len(cookies)} 个 cookie 到 {COOKIE_FILE}")
+        except Exception as e:
+            logging.warning(f"保存 cookie 失败: {str(e)[:80]}")
+
+    def _check_login(self):
+        """检查当前会话是否已登录（访问 reserve/info 接口，未登录会跳转/报错）"""
+        try:
+            # 从 config 读取 roomid/seatNum 用于检查登录态
+            try:
+                cfg = json.load(open(os.path.join(os.path.dirname(COOKIE_FILE), "config.json"), encoding="utf-8"))
+                u = cfg["reserve"][0]
+                roomid = u["roomid"]
+                seatid = u["seatid"][0] if isinstance(u["seatid"], list) else u["seatid"]
+                seat_num = int(seatid)
+            except Exception:
+                roomid, seat_num = "14176", 27
+            url = f"https://office.chaoxing.com/data/apps/seat/reserve/info?id={roomid}&seatNum={seat_num}"
+            r = self.requests.get(url=url, verify=False, timeout=10, allow_redirects=False)
+            if r.status_code != 200:
+                return False
+            data = r.json()
+            if data.get("success") is False:
+                return False
+            if data.get("msg") and ("登录" in str(data["msg"]) or "未登录" in str(data["msg"])):
+                return False
+            return True
+        except Exception as e:
+            logging.warning(f"登录态检查异常: {str(e)[:60]}")
+            return False
+
     def get_login_status(self):
-        """获取登录状态（用桌面UA初始化会话，避免手机UA被风控）"""
+        """获取登录状态：优先复用已保存 cookie，有效则无需重新登录"""
         init_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Referer": "https://office.chaoxing.com/",
@@ -109,6 +169,14 @@ class reserve:
         }
         self.requests.headers.update(init_headers)
         self.requests.get(url=self.login_page, verify=False)
+
+        # 优先复用已保存的 cookie
+        if self._load_cookies():
+            if self._check_login():
+                logging.info("✓ 使用已保存的登录 cookie（无需重新登录）")
+                return True
+            logging.info("已保存 cookie 已失效，需要重新登录")
+        return False
 
     def login(self, username, password):
         username = AES_Encrypt(username)
@@ -135,6 +203,8 @@ class reserve:
         obj = jsons.json()
         if obj["status"]:
             logging.info(f"用户 {username} 登录成功")
+            # 登录成功后持久化 cookie，避免频繁登录触发风控
+            self._save_cookies()
             return (True, "")
         else:
             logging.info(

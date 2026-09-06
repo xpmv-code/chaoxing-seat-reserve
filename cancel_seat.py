@@ -38,14 +38,14 @@ def cancel_seat(config_path="config.json"):
 
     logging.info(f"退座任务启动 - 账号:{username} 房间:{roomid} 座位:{seatid}")
 
-    # 登录
+    # 登录（优先复用已保存cookie）
     s = reserve()
-    s.get_login_status()
-    login_ok, msg = s.login(username, password)
-    if not login_ok:
-        logging.error(f"登录失败: {msg}")
-        send_bark(config, f"退座失败：登录失败 - {msg}")
-        return
+    if not s.get_login_status():
+        login_ok, msg = s.login(username, password)
+        if not login_ok:
+            logging.error(f"登录失败: {msg}")
+            send_bark(config, f"退座失败：登录失败 - {msg}")
+            return
     s.requests.headers.update({'Host': 'office.chaoxing.com'})
 
     # 获取当前预约信息
