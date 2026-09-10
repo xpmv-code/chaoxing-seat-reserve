@@ -557,6 +557,7 @@ class reserve:
                 return seat_info['id']
             else:
                 logging.info(f"✗ 续约失败: {result.get('msg', '')}")
+                self.last_error = result.get("msg", "续约失败")
                 return None
         except Exception as e:
             logging.error(f"✗ 续约异常: {str(e)[:100]}")

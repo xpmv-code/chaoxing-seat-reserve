@@ -94,7 +94,7 @@ python main.py -u config.json -m debug
 
 ### 5、定时任务（推荐方案）
 
-由于长进程在定时环境中容易被终止，**推荐拆分为多个短时任务**：
+由于长进程在定时环境中容易被终止，**推荐拆分为多个短时任务**。续约采用"签到后一次续约到闭馆 + 中午检查兜底"，减少提交次数、避免触发风控：
 
 ```bash
 crontab -e
@@ -106,12 +106,12 @@ crontab -e
 0 8 * * 1-5  cd /path/to/chaoxing-seat-reserve && python sign_seat.py -u config.json
 0 9 * * 0,6  cd /path/to/chaoxing-seat-reserve && python sign_seat.py -u config.json
 
-# 续约（工作日 12:00/16:00，周末 13:00/17:00，末段统一 20:00）
-0 12 * * 1-5 cd /path/to/chaoxing-seat-reserve && python renew_seat.py -u config.json
-0 13 * * 0,6 cd /path/to/chaoxing-seat-reserve && python renew_seat.py -u config.json
-0 16 * * 1-5 cd /path/to/chaoxing-seat-reserve && python renew_seat.py -u config.json
-0 17 * * 0,6 cd /path/to/chaoxing-seat-reserve && python renew_seat.py -u config.json
-0 20 * * *  cd /path/to/chaoxing-seat-reserve && python renew_seat.py -u config.json
+# 续约到闭馆（签到后1小时：工作日 09:00 / 周末 10:00，一次跑完后续所有时段）
+0 9 * * 1-5  cd /path/to/chaoxing-seat-reserve && python renew_seat.py -u config.json
+0 10 * * 0,6 cd /path/to/chaoxing-seat-reserve && python renew_seat.py -u config.json
+
+# 中午检查兜底（每天12:00，若上午续约失败/token不足则自动补续）
+0 12 * * *  cd /path/to/chaoxing-seat-reserve && python renew_seat.py -u config.json
 
 # 退座（每天22:00闭馆后）
 0 22 * * * cd /path/to/chaoxing-seat-reserve && python cancel_seat.py -u config.json
@@ -122,9 +122,8 @@ crontab -e
 ```
 00:00  抢座第一段 08:00-12:00
 08:00  签到（仅一次）
-12:00  续约 12:00-16:00
-16:00  续约 16:00-20:00
-20:00  续约 20:00-22:00
+09:00  续约到闭馆 12-16、16-20、20-22（一次跑完，间隔2秒）
+12:00  检查兜底（已续满则跳过）
 22:00  退座
 ```
 
