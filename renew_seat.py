@@ -85,14 +85,14 @@ def renew_seat(config_path="config.json"):
 
         seg_start, seg_end = next_segment(end_ms, close_time)
         if seg_start >= seg_end:
-            # 已到闭馆
+            # 预约已覆盖到闭馆，无需再续
             if renewed:
                 msg = "、".join(f"{a}-{b}" for a, b in renewed)
                 logging.info(f"续约完成，覆盖至 {end_str}")
-                send_bark(config, f"续约成功 {msg}（至{end_str}）")
+                send_bark(config, f"续约成功 {msg}（覆盖至{end_str}）")
             else:
-                logging.info(f"当前预约已到闭馆时间 {end_str}，无需续约")
-                send_bark(config, f"续约：已到闭馆时间 {end_str}")
+                logging.info(f"当前预约已覆盖至闭馆时间 {end_str}，无需续约")
+                send_bark(config, f"续约：预约已覆盖至闭馆时间 {end_str}")
             return
 
         logging.info(f"当前预约 reserveId={reserve_id} 结束于 {end_str}，续约 {seg_start}-{seg_end}")
