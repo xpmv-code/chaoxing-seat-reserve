@@ -576,16 +576,10 @@ class reserve:
             return
 
         # 构建推送内容
-        body_lines = []
-        for idx, result in enumerate(self.success_results, 1):
-            body_lines.append(
-                f"预约 {idx}：\n"
-                f"房间 {result['roomId']}｜座位 {result['seatNum']}\n"
-                f"{result['day']} {result['startTime']}~{result['endTime']}"
-            )
+        body_lines = [f"座位{r['seatNum']} {r['startTime']}-{r['endTime']}" for r in self.success_results]
         payload = {
-            "title": f"超星图书馆预约成功（共{len(self.success_results)}条）",
-            "body": "\n\n".join(body_lines),
+            "title": "抢座成功",
+            "body": "\n".join(body_lines),
             "group": "超星抢座",
         }
 

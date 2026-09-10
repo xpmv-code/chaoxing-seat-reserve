@@ -61,7 +61,7 @@ def renew_seat(config_path="config.json"):
         ok, msg = s.login(username, password)
         if not ok:
             logging.error(f"登录失败: {msg}")
-            send_bark(config, f"续约失败：登录失败 - {msg}")
+            send_bark(config, "续约失败", f"座位{seatid}：登录失败 - {msg}")
             return
     s.requests.headers.update({'Host': 'office.chaoxing.com'})
 
@@ -76,7 +76,7 @@ def renew_seat(config_path="config.json"):
                 logging.info("续约过程中当前预约消失，停止续约")
             else:
                 logging.info("当前没有进行中的预约，无需续约")
-                send_bark(config, "续约：当前无进行中的预约")
+                send_bark(config, "续约跳过", f"座位{seatid}：无进行中预约")
             return
 
         reserve_id = seat_reserve.get("id")
@@ -89,10 +89,10 @@ def renew_seat(config_path="config.json"):
             if renewed:
                 msg = "、".join(f"{a}-{b}" for a, b in renewed)
                 logging.info(f"续约完成，覆盖至 {end_str}")
-                send_bark(config, f"续约成功 {msg}（覆盖至{end_str}）")
+                send_bark(config, "续约成功", f"座位{seatid} {msg}（覆盖至{end_str}）")
             else:
                 logging.info(f"当前预约已覆盖至闭馆时间 {end_str}，无需续约")
-                send_bark(config, f"续约：预约已覆盖至闭馆时间 {end_str}")
+                send_bark(config, "续约跳过", f"座位{seatid}：已覆盖至闭馆{close_time}")
             return
 
         logging.info(f"当前预约 reserveId={reserve_id} 结束于 {end_str}，续约 {seg_start}-{seg_end}")
@@ -101,26 +101,30 @@ def renew_seat(config_path="config.json"):
             err = getattr(s, 'last_error', None) or "可能未签到或风控"
             logging.error(f"续约失败 - 座位{seatid} {seg_start}-{seg_end}: {err}")
             if renewed:
-                send_bark(config, f"续约部分完成 {renewed}，下一段{seg_start}-{seg_end}失败：{err}")
+                renew_msg = "、".join(f"{a}-{b}" for a, b in renewed)
+                send_bark(config, "续约部分失败", f"座位{seatid} 已续{renew_msg}；{seg_start}-{seg_end}失败：{err}")
             else:
-                send_bark(config, f"续约失败 - 座位{seatid} {seg_start}-{seg_end}：{err}")
+                send_bark(config, "续约失败", f"座位{seatid}：{err}")
             return
         renewed.append((seg_start, seg_end))
         time.sleep(2)  # 每次续约间隔，避免过频触发风控
 
 
-def send_bark(config, message):
-    """通过 Bark 推送通知"""
+def send_bark(config, title, body, group="超星续约"):
+    """通过 Bark 推送通知（统一结构化格式）"""
     bark = config.get("bark", {})
-    server = bark.get("server", "https://api.day.app")
+    server = bark.get("server", "https://api.day.app").rstrip("/")
     key = bark.get("key", "")
     if not key:
         logging.warning("未配置 Bark key，跳过推送")
         return
     try:
         import requests
-        url = f"{server}/{key}/超星续约/{message}"
-        requests.get(url, timeout=10)
+        requests.post(f"{server}/{key}", json={
+            "title": title,
+            "body": body,
+            "group": group,
+        }, timeout=10)
     except Exception as e:
         logging.warning(f"Bark 推送失败: {str(e)[:50]}")
 

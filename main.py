@@ -247,8 +247,8 @@ def reserve_first(users, action=False):
             if key:
                 try:
                     requests.post(f"{server}/{key}", json={
-                        "title": "超星抢座失败",
-                        "body": f"座位{seat} {first_start}-{first_end} 预约失败：{err}",
+                        "title": "抢座失败",
+                        "body": f"座位{seat} {first_start}-{first_end}：{err}",
                         "group": "超星抢座",
                     }, timeout=10)
                     logging.info("✓ Bark 推送失败通知")

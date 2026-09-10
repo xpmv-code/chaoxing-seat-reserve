@@ -44,7 +44,7 @@ def cancel_seat(config_path="config.json"):
         login_ok, msg = s.login(username, password)
         if not login_ok:
             logging.error(f"登录失败: {msg}")
-            send_bark(config, f"退座失败：登录失败 - {msg}")
+            send_bark(config, "退座失败", f"座位{seatid}：登录失败 - {msg}")
             return
     s.requests.headers.update({'Host': 'office.chaoxing.com'})
 
@@ -53,7 +53,7 @@ def cancel_seat(config_path="config.json"):
     seat_reserve = s.get_cur_reserve(roomid, seatid, fid_enc)
     if not seat_reserve:
         logging.info("当前没有进行中的预约，无需退座")
-        send_bark(config, "退座：当前无进行中的预约")
+        send_bark(config, "退座跳过", f"座位{seatid}：无进行中预约")
         return
 
     reserve_id = seat_reserve.get("id")
@@ -80,30 +80,33 @@ def cancel_seat(config_path="config.json"):
         result = r.json()
     except Exception as e:
         logging.error(f"{action_text}请求失败: {str(e)[:100]}")
-        send_bark(config, f"{action_text}失败：请求异常")
+        send_bark(config, "退座失败", f"座位{seatid}：请求异常")
         return
 
     if result.get("success"):
         logging.info(f"{action_text}成功 - reserveId:{reserve_id} 座位:{seatid} {start_str}-{end_str}")
-        send_bark(config, f"{action_text}成功 - 座位{seatid} {start_str}-{end_str} 已释放")
+        send_bark(config, "退座成功", f"座位{seatid} {start_str}-{end_str} 已释放")
     else:
         msg = result.get("msg", "未知错误")
         logging.error(f"{action_text}失败: {msg}")
-        send_bark(config, f"{action_text}失败：{msg}")
+        send_bark(config, "退座失败", f"座位{seatid}：{msg}")
 
 
-def send_bark(config, message):
-    """通过 Bark 推送通知"""
+def send_bark(config, title, body, group="超星退座"):
+    """通过 Bark 推送通知（统一结构化格式）"""
     bark = config.get("bark", {})
-    server = bark.get("server", "https://api.day.app")
+    server = bark.get("server", "https://api.day.app").rstrip("/")
     key = bark.get("key", "")
     if not key:
         logging.warning("未配置 Bark key，跳过推送")
         return
     try:
         import requests
-        url = f"{server}/{key}/超星退座/{message}"
-        requests.get(url, timeout=10)
+        requests.post(f"{server}/{key}", json={
+            "title": title,
+            "body": body,
+            "group": group,
+        }, timeout=10)
     except Exception as e:
         logging.warning(f"Bark 推送失败: {str(e)[:50]}")
 
