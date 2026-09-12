@@ -16,7 +16,8 @@ from utils import reserve
 
 
 def next_segment(end_time_ms, close_time):
-    """计算下一段：从当前预约结束时间起，最多4小时，不超过闭馆时间"""
+    """计算下一段：从当前预约结束时间起，每段2-4小时且不超过闭馆；
+    若本段切4小时后剩余不足2小时，则缩短本段，保证后续每段都≥2小时（平台最少2小时）"""
     end_dt = datetime.datetime.fromtimestamp(end_time_ms / 1000)
     # 起始对齐到半小时
     start_dt = end_dt.replace(minute=0, second=0, microsecond=0)
@@ -26,8 +27,22 @@ def next_segment(end_time_ms, close_time):
 
     close_h, close_m = map(int, close_time.split(":"))
     close_dt = end_dt.replace(hour=close_h, minute=close_m, second=0, microsecond=0)
-    end_candidate = start_dt + datetime.timedelta(hours=4)
-    end_dt2 = min(end_candidate, close_dt)
+
+    # 剩余时长（小时）
+    remain = (close_dt - start_dt).total_seconds() / 3600
+    if remain < 2:
+        # 剩余不足2小时，无法续约合法时段，返回 start==end 表示结束
+        return start, start
+
+    if remain >= 4:
+        hours = 4
+        # 切完4小时后剩余不足2小时 → 本段缩短，给下一段留足2小时
+        if remain - 4 < 2:
+            hours = remain - 2
+    else:
+        hours = remain
+
+    end_dt2 = start_dt + datetime.timedelta(hours=hours)
     end = end_dt2.strftime("%H:%M")
     return start, end
 
@@ -85,11 +100,14 @@ def renew_seat(config_path="config.json"):
 
         seg_start, seg_end = next_segment(end_ms, close_time)
         if seg_start >= seg_end:
-            # 预约已覆盖到闭馆，无需再续
+            # 无法再续：区分"已覆盖到闭馆"与"剩余不足2小时无法续约"
             if renewed:
                 msg = "、".join(f"{a}-{b}" for a, b in renewed)
                 logging.info(f"续约完成，覆盖至 {end_str}")
                 send_bark(config, "续约成功", f"座位{seatid} {msg}（覆盖至{end_str}）")
+            elif end_str < close_time:
+                logging.info(f"当前预约结束于 {end_str}，剩余不足2小时，无法续约（平台最少2小时）")
+                send_bark(config, "续约跳过", f"座位{seatid}：已至{end_str}，剩余不足2小时无法续约")
             else:
                 logging.info(f"当前预约已覆盖至闭馆时间 {end_str}，无需续约")
                 send_bark(config, "续约跳过", f"座位{seatid}：已覆盖至闭馆{close_time}")
