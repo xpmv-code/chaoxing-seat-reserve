@@ -128,7 +128,7 @@ def renew_seat(config_path="config.json"):
         time.sleep(2)  # 每次续约间隔，避免过频触发风控
 
 
-def send_bark(config, title, body, group="超星续约"):
+def send_bark(config, title, body, group="超星座位"):
     """通过 Bark 推送通知（统一结构化格式）"""
     bark = config.get("bark", {})
     server = bark.get("server", "https://api.day.app").rstrip("/")

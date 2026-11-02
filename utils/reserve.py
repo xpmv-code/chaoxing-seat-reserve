@@ -580,7 +580,7 @@ class reserve:
         payload = {
             "title": "抢座成功",
             "body": "\n".join(body_lines),
-            "group": "超星抢座",
+            "group": "超星座位",
         }
 
         # 用独立请求发送，避免复用带 office.chaoxing.com Host 头的会话

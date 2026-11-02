@@ -68,7 +68,7 @@ def sign_seat(config_path="config.json"):
         send_bark(config, "签到失败", f"座位{seatid}")
 
 
-def send_bark(config, title, body, group="超星签到"):
+def send_bark(config, title, body, group="超星座位"):
     """通过 Bark 推送通知（统一结构化格式）"""
     bark = config.get("bark", {})
     server = bark.get("server", "https://api.day.app").rstrip("/")

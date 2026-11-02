@@ -92,7 +92,7 @@ def cancel_seat(config_path="config.json"):
         send_bark(config, "退座失败", f"座位{seatid}：{msg}")
 
 
-def send_bark(config, title, body, group="超星退座"):
+def send_bark(config, title, body, group="超星座位"):
     """通过 Bark 推送通知（统一结构化格式）"""
     bark = config.get("bark", {})
     server = bark.get("server", "https://api.day.app").rstrip("/")
